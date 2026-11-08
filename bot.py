@@ -4,7 +4,7 @@ import sys
 from aiogram import Bot, Dispatcher, html, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import (
     Message, 
     ReplyKeyboardMarkup, 
@@ -21,6 +21,9 @@ TOKEN = "9257258356:AAH6aoZiLR4Of62FhkrNA0VJAFP9VmjPAIg"
 ADMIN_USERNAME = "@komiljonovv_8"
 
 dp = Dispatcher(storage=MemoryStorage())
+
+# Foydalanuvchilarning taklif qilgan odamlari soni: {user_id: count}
+referrals_db = {}
 
 class OrderForm(StatesGroup):
     lang = State()
@@ -43,26 +46,50 @@ def main_menu(lang="uz"):
     if lang == "ru":
         kb = [
             [KeyboardButton(text="Portfel"), KeyboardButton(text="Zakaz qilish")],
-            [KeyboardButton(text="🧮 Калькулятор"), KeyboardButton(text="Savollar")],
-            [KeyboardButton(text="Aloqa")]
+            [KeyboardButton(text="🧮 Калькулятор"), KeyboardButton(text="🎁 Рефералы")],
+            [KeyboardButton(text="Savollar"), KeyboardButton(text="Aloqa")]
         ]
     elif lang == "en":
         kb = [
             [KeyboardButton(text="Portfolio"), KeyboardButton(text="Order Project")],
-            [KeyboardButton(text="🧮 Calculator"), KeyboardButton(text="FAQ")],
-            [KeyboardButton(text="Contact")]
+            [KeyboardButton(text="🧮 Calculator"), KeyboardButton(text="🎁 Referrals")],
+            [KeyboardButton(text="FAQ"), KeyboardButton(text="Contact")]
         ]
     else:
         kb = [
             [KeyboardButton(text="Portfolio"), KeyboardButton(text="Buyurtma berish")],
-            [KeyboardButton(text="🧮 Narxni hisoblash"), KeyboardButton(text="Savollar")],
-            [KeyboardButton(text="Bog'lanish")]
+            [KeyboardButton(text="🧮 Narxni hisoblash"), KeyboardButton(text="🎁 Referallarim")],
+            [KeyboardButton(text="Savollar"), KeyboardButton(text="Bog'lanish")]
         ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 @dp.message(CommandStart())
-async def command_start_handler(message: Message, state: FSMContext) -> None:
+async def command_start_handler(message: Message, command: CommandObject, state: FSMContext) -> None:
     await state.clear()
+    
+    args = command.args
+    if args and args.startswith("ref_"):
+        inviter_id = args.split("_")[1]
+        current_user_id = str(message.from_user.id)
+        
+        if inviter_id != current_user_id:
+            inviter_id_int = int(inviter_id)
+            
+            # Takliflar sonini 1 taga oshiramiz
+            current_count = referrals_db.get(inviter_id_int, 0) + 1
+            referrals_db[inviter_id_int] = current_count
+            
+            # Taklif qilgan odamga xabar yuborish
+            new_user_name = message.from_user.username or message.from_user.first_name
+            notif_text = (
+                f"🎉 Sizning havolangiz orqali <b>{new_user_name}</b> botga qo'shildi!\n"
+                f"👥 Takliflaringiz: <b>{current_count}/5</b>"
+            )
+            try:
+                await message.bot.send_message(chat_id=inviter_id_int, text=notif_text)
+            except Exception as e:
+                logging.error(f"Xabar yuborishda xatolik: {e}")
+
     await message.answer(
         "Assalomu alaykum! Tilni tanlang / Выберите язык / Select language:",
         reply_markup=lang_keyboard()
@@ -107,6 +134,23 @@ async def process_portfolio_callback(callback: CallbackQuery):
         text = "Loyiha: Landscape\nMaydoni: 6 sotix"
     
     await callback.message.answer_photo(photo=photo_url, caption=text)
+
+# 🎁 REFERALLAR BO'LIMI
+@dp.message(F.text.in_(["🎁 Referallarim", "🎁 Рефералы", "🎁 Referrals"]))
+async def show_referrals(message: Message):
+    user_id = message.from_user.id
+    bot_info = await message.bot.get_me()
+    ref_count = referrals_db.get(user_id, 0)
+    
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
+    
+    text = (
+        f"🎁 <b>Sizning taklif havolangiz:</b>\n"
+        f"<code>{ref_link}</code>\n\n"
+        f"👥 Taklif qilgan do'stlaringiz: <b>{ref_count}/5 ta</b>\n\n"
+        f"<i>Aksiya shartiga ko'ra kamida 5 ta do'stingizni taklif qiling va 3 oylik Telegram Premium yutib olish imkoniyatiga ega bo'ling!</i>"
+    )
+    await message.answer(text)
 
 # 🧮 KALKULYATOR
 @dp.message(F.text.in_(["🧮 Narxni hisoblash", "🧮 Калькулятор", "🧮 Calculator"]))
